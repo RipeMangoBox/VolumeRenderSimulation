@@ -37,12 +37,32 @@ public class RandomOpt
 
     public Double RandDouble() { return rand.NextDouble(); }
     
-    public float RandFloat(float offset = 0.1f) { return Mathf.Lerp(0.1f, 0.9f, (float)rand.NextDouble() + offset); }
+    public float RandFloat(float offset = 0.1f) { return Mathf.Lerp(0.1f, 1f, (float)rand.NextDouble() + offset); }
     public int RandInt() { return rand.Next(); }
     public int RandInt(int min, int max) { return rand.Next(min, max + 1); }
 }
 
-public class SphereCcontroller : MonoBehaviour
+[Serializable]
+public class BallsMovingParameters
+{
+    public float moveTime = 0.1f; // 移动时间
+    public float waitingTime = 0.1f;
+    public float fadeOutTime = 0.1f; // 消失时间
+
+    public float TotalMovingTime()
+    {
+        return moveTime + waitingTime + fadeOutTime;
+    }
+    
+    public void UpdateParameters(float times = 0.8f)
+    {
+        moveTime *= times;
+        waitingTime *= times;
+        fadeOutTime *= times;
+    }
+}
+
+public class SphereController : MonoBehaviour
 {
     // 格子数量
     public int rows;
@@ -72,12 +92,14 @@ public class SphereCcontroller : MonoBehaviour
 
     private int _stateX = 0;
     private int _stateY = 0;
-    private int currentSphere = 0;
-    
+
     private float movingInterval = 3f;
     private float alphaSum = 0f;
 
     private RandomOpt randOpt;
+    
+    [SerializeField]
+    public BallsMovingParameters ballsMovingParameters;
     
         
     private void Start()
@@ -88,13 +110,13 @@ public class SphereCcontroller : MonoBehaviour
 
         CreateGrid();
 
-        CreateSphere();
-        
-        //VolumeRender();
-        DrawPixel(0, 0);
+        //CreateSphere();
         
         // 注册槽函数
         SubscribeToPublisher();
+        
+        DrawPixel(0, 0);
+        
 
     }
 
@@ -121,6 +143,7 @@ public class SphereCcontroller : MonoBehaviour
             sphereArray[i] = Instantiate(msphere, ray.transform);
         
         // sphere颜色构建
+        alphaSum = 0f;// 勿忘归零
         SphereRGB = new Color[sphereNum];
         Random rand = new Random();
         for (int i = 0; i < sphereNum; ++i)
@@ -220,62 +243,52 @@ public class SphereCcontroller : MonoBehaviour
 
     private void DrawPixel(int x, int y)
     {
-        CreateSphere();
-        
+        Vector3 origin = virtualCamera.transform.position;
         Vector3 gridIntersactionP = Index2Position(x, y);
         Vector3 dir = GetDir(gridIntersactionP);
 
+        CreateSphere();
+        ballsMovingParameters.UpdateParameters();
         string info = String.Format("dir: ({0}, {1}, {2})", dir[0], dir[1], dir[2]);
         Debug.Log(info);
 
         var tarList = CreateTargetL(gridIntersactionP, dir);
         
+        ray.AddComponent<BallsMoving>();
+        var ballsMoving = ray.GetComponent<BallsMoving>();
+        
+        float[] sphereColorWeightArray = new float[sphereNum];
         for (int i = 0;i < sphereNum;++i)
         {
             var _sphere = sphereArray[i];
             _sphere.transform.position = gridIntersactionP + dir * stepL * (i + 1);
             _sphere.GetComponent<Renderer>().material.color = SphereRGB[i];
-            _sphere.AddComponent<BallMoving>();
-            var ballMoving = _sphere.GetComponent<BallMoving>();
-            
-            ballMoving.SetTargetPosition(tarList);
-            ballMoving.SetBindingCell(Grid[x, y], SphereRGB[i].a/alphaSum);
 
-            ballMoving.SetFadeOutTime(movingInterval);
-            ballMoving.StartMoving(2 * i * movingInterval);
-            
-            //Grid[3, 2].GetComponent<Image>().color += SphereRGB[i]/ sphereNum * SphereRGB[i].a;
+            sphereColorWeightArray[i] = SphereRGB[i].a / alphaSum;
         }
-    }
-
-    private void VolumeRender()
-    {
-        for(int i = 0;i < rows;++i)
-            for(int j = 0;j < cols;++j)
-                DrawPixel(i, j);
+        // 绘制射线
+        Debug.DrawLine(origin, origin + dir * stepL * (sphereNum + 5), Color.red,  sphereNum * 1.2f * ballsMovingParameters.TotalMovingTime());
+        ballsMoving.StartMoving(sphereArray, tarList, Grid[x, y], sphereColorWeightArray, ballsMovingParameters);
     }
 
     private void OnStateSignalReceived()
     {
-        currentSphere++;
-        String info = String.Format("currentSphere: {0}, _stateX: {1}, _stateY: {2}", currentSphere, _stateX, _stateY);
+        String info = String.Format("_stateX: {0}, _stateY: {1}", _stateX, _stateY);
         Debug.Log(info);
-        if (currentSphere == sphereNum)
+
+        if (_stateX == cols - 1 && _stateY == rows - 1) return;
+        if (_stateX == cols - 1)
         {
-            if (_stateY == rows) return;
-            if (_stateX == cols)
-            {
-                _stateX = 0;
-                _stateY++;
-            }
-            currentSphere = 0;
-            _stateX++;
+            _stateX = 0;
+            _stateY++;
             DrawPixel(_stateX, _stateY);
         }
         else
         {
+            _stateX++;
             DrawPixel(_stateX, _stateY);
         }
+
     }
     
 }
